@@ -56,7 +56,7 @@ const Game = () => {
     setTyping(true);
 
     try {
-      const res = await axios.post("http://localhost:3000/api/ai", {
+      const res = await axios.post("https://aidriven-game.onrender.com/api/ai", {
         offer,
         history: messages,
       });
