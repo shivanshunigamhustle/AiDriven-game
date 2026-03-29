@@ -1,142 +1,163 @@
-import { useState } from "react";
-import ChatBox from "../components/chat/ChatBox";
-import OfferInput from "../components/game/OfferInput";
+import { useEffect, useState, useRef } from "react";
+import axios from "axios";
+import { socket } from "../services/socket";
+import { motion, AnimatePresence } from "framer-motion";
 
-export default function Game() {
-  const [messages, setMessages] = useState([
-    { sender: "ai", text: "Welcome! Price is ₹1000. Start bargaining." },
-  ]);
+const Game = () => {
+  const [offer, setOffer] = useState("");
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [typing, setTyping] = useState(false);
+  const [score, setScore] = useState(0);
 
-  const [input, setInput] = useState("");
-  const [round, setRound] = useState(1);
-  const maxRounds = 5;
-  const [gameOver, setGameOver] = useState(false);
-  const [finalPrice, setFinalPrice] = useState(null);
-  const [isTyping, setIsTyping] = useState(false);
+  const chatRef = useRef(null);
 
-  const addMessage = (msg) => {
-    setMessages((prev) => [...prev, msg]);
-  };
+  const roomId = "room1";
+  const playerName = "You";
 
-  const handleRestart = () => {
-    setMessages([
-      { sender: "ai", text: "Welcome! Price is ₹1000. Start bargaining." },
-    ]);
-    setRound(1);
-    setGameOver(false);
-    setFinalPrice(null);
-    setInput("");
-  };
+  // 🔌 socket connect
+  useEffect(() => {
+    socket.emit("join_room", { roomId, username: playerName });
 
-  const handleSend = () => {
-    if (!input.trim() || gameOver) return;
+    socket.on("receive_offer", (data) => {
+      setMessages((prev) => [
+        ...prev,
+        { role: "other", text: `${data.player}: ₹${data.offer}` },
+      ]);
+    });
 
-    const offer = parseInt(input);
+    return () => {
+      socket.off("receive_offer");
+    };
+  }, []);
 
-    addMessage({ sender: "user", text: input });
-    setInput("");
-    setIsTyping(true);
+  // 📜 auto scroll
+  useEffect(() => {
+    chatRef.current?.scrollTo({
+      top: chatRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages]);
 
-    setTimeout(() => {
-      let aiResponse = "";
-      let aiPrice = 1000;
+  // 💰 submit offer
+  const handleSubmit = async () => {
+    if (!offer || loading) return;
 
-      if (offer >= 900) {
-        aiResponse = "🤝 Deal! You got it for ₹900.";
-        aiPrice = 900;
-      } else if (offer >= 800) {
-        aiResponse = "Hmm… you're close. ₹920 😐";
-        aiPrice = 920;
-      } else if (offer >= 700) {
-        aiResponse = "Too low! ₹950 😤";
-        aiPrice = 950;
-      } else {
-        aiResponse = "No chance 😑";
-        aiPrice = 1000;
-      }
+    const userMsg = { role: "user", text: `₹${offer}` };
+    setMessages((prev) => [...prev, userMsg]);
 
-      setIsTyping(false);
-      addMessage({ sender: "ai", text: aiResponse });
+    socket.emit("send_offer", {
+      roomId,
+      offer,
+      player: playerName,
+    });
 
-      if (round === maxRounds) {
-        setGameOver(true);
-        setFinalPrice(aiPrice);
+    setLoading(true);
+    setTyping(true);
 
-        setTimeout(() => {
-          addMessage({
-            sender: "ai",
-            text:
-              aiPrice <= 900
-                ? "🎉 Deal done! You win!"
-                : "❌ You lost. Price too high.",
-          });
-        }, 500);
-      } else {
-        setRound((prev) => prev + 1);
-      }
-    }, 1200);
+    try {
+      const res = await axios.post("http://localhost:3000/api/ai", {
+        offer,
+        history: messages,
+      });
+
+      setTimeout(() => {
+        const aiMsg = { role: "ai", text: res.data.reply };
+
+        setMessages((prev) => [...prev, aiMsg]);
+        setScore(res.data.score);
+
+        setTyping(false);
+        setLoading(false);
+      }, 800);
+    } catch (err) {
+      console.error(err);
+      setLoading(false);
+      setTyping(false);
+    }
+
+    setOffer("");
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-black via-gray-900 to-black text-white">
+    <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-gray-800 flex items-center justify-center px-4">
+      
+      {/* 🎮 Main Card */}
+      <div className="w-full max-w-md backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-2xl p-4">
 
-      {/* 🔥 HEADER */}
-      <div className="flex justify-between items-center px-6 py-4 bg-white/5 backdrop-blur border-b border-gray-800">
-
-        <h1 className="text-2xl font-bold">🎮 Negotiation Arena</h1>
-
-        <div className="flex gap-3">
-          <span className="bg-gray-800 px-3 py-1 rounded-full text-sm">
-            Round {round}/{maxRounds}
-          </span>
-          <span className="bg-red-500 px-3 py-1 rounded-full text-sm">
-            😠 Aggressive
-          </span>
-        </div>
-
-        <button
-          onClick={handleRestart}
-          className="bg-green-500 px-4 py-2 rounded hover:bg-green-600"
-        >
-          Restart
-        </button>
-      </div>
-
-      {/* 💬 CHAT */}
-      <div className="flex-1 overflow-hidden">
-        <ChatBox messages={messages} />
-      </div>
-
-      {/* 🤖 TYPING */}
-      {isTyping && (
-        <div className="px-4 text-gray-400 text-sm animate-pulse">
-          🤖 AI is typing...
-        </div>
-      )}
-
-      {/* 💰 INPUT */}
-      <OfferInput
-        input={input}
-        setInput={setInput}
-        handleSend={handleSend}
-        gameOver={gameOver}
-      />
-
-      {/* 🎉 RESULT */}
-      {gameOver && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/70">
-          <div className="bg-gray-900 p-6 rounded-xl text-center">
-            <h2 className="text-xl font-bold mb-2">Game Over</h2>
-            <p>Final Price: ₹{finalPrice}</p>
-            <button
-              onClick={handleRestart}
-              className="mt-3 bg-blue-500 px-4 py-2 rounded"
-            >
-              Play Again
-            </button>
+        {/* 🔥 Header */}
+        <div className="flex justify-between items-center mb-4">
+          <h1 className="text-xl font-bold text-white">💰 Bargain Battle</h1>
+          <div className="bg-green-500/20 px-3 py-1 rounded-full text-green-400 text-sm">
+            Score: {score}
           </div>
         </div>
-      )}
+
+        {/* 💬 Chat */}
+        <div
+          ref={chatRef}
+          className="h-80 overflow-y-auto space-y-2 mb-4 pr-1"
+        >
+          <AnimatePresence>
+            {messages.map((msg, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0 }}
+                className={`p-2 px-3 rounded-xl text-sm max-w-[75%] ${
+                  msg.role === "user"
+                    ? "ml-auto bg-blue-500 text-white"
+                    : msg.role === "ai"
+                    ? "bg-green-500 text-white"
+                    : "bg-purple-500 text-white"
+                }`}
+              >
+                {msg.text}
+              </motion.div>
+            ))}
+          </AnimatePresence>
+
+          {/* 🤖 typing indicator */}
+          {typing && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-gray-400 text-sm"
+            >
+              Shopkeeper is typing... 🤖
+            </motion.div>
+          )}
+        </div>
+
+        {/* 💸 FORM INPUT (ENTER FIXED) */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSubmit();
+          }}
+          className="flex gap-2"
+        >
+          <input
+            type="number"
+            value={offer}
+            onChange={(e) => setOffer(e.target.value)}
+            placeholder="Enter your offer ₹..."
+            className="flex-1 p-2 rounded-lg bg-white/20 text-white placeholder-gray-300 outline-none"
+          />
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="bg-blue-600 hover:bg-blue-700 px-4 rounded-lg transition font-semibold"
+          >
+            {loading ? "..." : "Send"}
+          </button>
+        </form>
+
+      </div>
     </div>
   );
-}
+};
+
+export default Game;

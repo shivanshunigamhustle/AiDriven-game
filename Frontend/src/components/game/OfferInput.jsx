@@ -1,29 +1,55 @@
+import { motion } from "framer-motion";
+
 export default function OfferInput({
   input,
   setInput,
   handleSend,
   gameOver,
+  loading,
 }) {
-  return (
-    <div className="flex p-4 border-t border-gray-800 gap-2">
 
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !loading && !gameOver) {
+      handleSend();
+    }
+  };
+
+  return (
+    <div className="p-3 bg-gray-900 flex gap-2 items-center">
+
+      {/* INPUT */}
       <input
         type="number"
         value={input}
-        disabled={gameOver}
         onChange={(e) => setInput(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && handleSend()}
+        onKeyDown={handleKeyDown}
         placeholder="Enter your offer..."
-        className="flex-1 px-4 py-2 rounded bg-gray-800 outline-none"
+        disabled={gameOver || loading}
+        className="flex-1 px-4 py-3 bg-gray-800 text-white rounded-xl outline-none focus:ring-2 focus:ring-blue-500 transition"
       />
 
-      <button
+      {/* BUTTON */}
+      <motion.button
+        whileTap={{ scale: 0.9 }}
+        whileHover={{ scale: loading ? 1 : 1.05 }}
         onClick={handleSend}
-        disabled={gameOver}
-        className="bg-blue-500 px-4 py-2 rounded hover:bg-blue-600"
+        disabled={loading || gameOver}
+        className={`px-5 py-3 rounded-xl font-semibold shadow-md transition-all
+          ${
+            loading
+              ? "bg-gray-600 cursor-not-allowed"
+              : "bg-blue-600 hover:bg-blue-700"
+          }`}
       >
-        Send
-      </button>
+        {loading ? (
+          <span className="flex items-center gap-2">
+            <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
+            Sending...
+          </span>
+        ) : (
+          "Send"
+        )}
+      </motion.button>
 
     </div>
   );

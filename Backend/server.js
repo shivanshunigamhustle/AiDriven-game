@@ -1,28 +1,36 @@
-import http from "http";
-import app from "./src/app.js";
-import connectDB from "./src/config/db.js"
-import { initSocket } from "./src/sockets/socket.js";
 import dotenv from "dotenv";
-
 dotenv.config();
+import http from "http";
+
+
+import app from "./src/app.js";
+import connectDB from "./src/config/db.js";
+import { initSocket } from "./src/sockets/socket.js";
+
+
 
 const PORT = process.env.PORT || 3000;
 
-// 🔥 create server
+// 🔥 create HTTP server
 const server = http.createServer(app);
 
-// 🔥 init socket
+// 🔥 initialize socket.io
 initSocket(server);
 
-// 🔥 DB connect
-connectDB();
+// 🔥 start server ONLY after DB connect
+const startServer = async () => {
+  try {
+    await connectDB();
+    console.log(" MongoDB Connected");
 
-// 🔥 start server
-server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});   
+    server.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+    });
 
+  } catch (error) {
+    console.error("❌ DB Connection Failed:", error);
+    process.exit(1);
+  }
+};
 
-
-
-
+startServer();

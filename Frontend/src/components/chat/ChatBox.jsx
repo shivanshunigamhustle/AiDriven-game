@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
 import MessageBubble from "./MessageBubble";
+import { useEffect, useRef } from "react";
 
 export default function ChatBox({ messages }) {
   const bottomRef = useRef();
@@ -9,16 +9,9 @@ export default function ChatBox({ messages }) {
   }, [messages]);
 
   return (
-    <div className="h-full overflow-y-auto p-4 space-y-4">
+    <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-black">
       {messages.map((msg, i) => (
-        <div
-          key={i}
-          className={`flex ${
-            msg.sender === "user" ? "justify-end" : "justify-start"
-          }`}
-        >
-          <MessageBubble {...msg} />
-        </div>
+        <MessageBubble key={i} {...msg} />
       ))}
       <div ref={bottomRef} />
     </div>
