@@ -1,290 +1,408 @@
 import { useEffect, useState, useRef } from "react";
 import axios from "axios";
-import { socket } from "../services/socket";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 
-const Game = () => {
+// 🛒 Product catalog
+const PRODUCTS = [
+  {
+    id: "phone",
+    name: "Smartphone",
+    emoji: "📱",
+    description: "Latest Android, 128GB",
+    startPrice: 15000,
+    minPrice: 10000,
+    category: "Electronics",
+  },
+  {
+    id: "jacket",
+    name: "Leather Jacket",
+    emoji: "🧥",
+    description: "Genuine leather, brown",
+    startPrice: 3000,
+    minPrice: 1800,
+    category: "Clothes",
+  },
+  {
+    id: "veggies",
+    name: "Vegetable Basket",
+    emoji: "🥦",
+    description: "1kg each — tomato, onion, potato",
+    startPrice: 300,
+    minPrice: 180,
+    category: "Grocery",
+  },
+  {
+    id: "sofa",
+    name: "3-Seater Sofa",
+    emoji: "🛋️",
+    description: "Fabric sofa, grey color",
+    startPrice: 25000,
+    minPrice: 17000,
+    category: "Furniture",
+  },
+];
+
+// 🏅 Score calculator: lower deal price = higher score
+const calcScore = (product, dealPrice, rounds) => {
+  const savings = product.startPrice - dealPrice;
+  const maxSavings = product.startPrice - product.minPrice;
+  const savingsPct = Math.min(savings / maxSavings, 1);
+  const roundBonus = Math.max(0, 10 - rounds) * 5; // fewer rounds = bonus
+  return Math.round(savingsPct * 800 + roundBonus + 100);
+};
+
+export default function Game() {
+  const [phase, setPhase] = useState("select"); // "select" | "play" | "result"
+  const [selectedProduct, setSelectedProduct] = useState(null);
   const [offer, setOffer] = useState("");
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [typing, setTyping] = useState(false);
   const [score, setScore] = useState(0);
-  const [gameOver, setGameOver] = useState(false);
+  const [rounds, setRounds] = useState(0);
+  const [dealPrice, setDealPrice] = useState(null);
   const [gameResult, setGameResult] = useState(null); // "win" | "lose"
 
   const chatRef = useRef(null);
   const navigate = useNavigate();
 
-  const roomId = "room1";
-  const playerName = "You";
-
-  // 🔌 socket connect
   useEffect(() => {
-    socket.emit("join_room", { roomId, username: playerName });
-
-    socket.on("receive_offer", (data) => {
-      setMessages((prev) => [
-        ...prev,
-        { role: "other", text: `${data.player}: ₹${data.offer}` },
-      ]);
-    });
-
-    return () => {
-      socket.off("receive_offer");
-    };
-  }, []);
-
-  // 📜 auto scroll
-  useEffect(() => {
-    chatRef.current?.scrollTo({
-      top: chatRef.current.scrollHeight,
-      behavior: "smooth",
-    });
+    chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
-  // 🔄 restart game
-  const handleRestart = () => {
-    setMessages([]);
-    setOffer("");
-    setScore(0);
-    setGameOver(false);
-    setGameResult(null);
-    setLoading(false);
-    setTyping(false);
+  const startGame = (product) => {
+    setSelectedProduct(product);
+    setPhase("play");
+    setMessages([{
+      role: "ai",
+      text: `Namaste! Aaj main aapko yeh ${product.name} sirf ₹${product.startPrice.toLocaleString()} mein de sakta hoon. Kya offer karenge? 😊`,
+    }]);
   };
 
-  // 💰 submit offer
   const handleSubmit = async () => {
-    if (!offer || loading || gameOver) return;
-
+    if (!offer || loading || phase !== "play") return;
     const numOffer = parseInt(offer);
+    if (isNaN(numOffer) || numOffer <= 0) return;
 
-    // Win/lose logic
-    if (numOffer >= 700 && numOffer <= 1000) {
-      if (numOffer <= 750) {
-        setGameOver(true);
-        setGameResult("win");
-      }
-    } else if (numOffer < 500) {
-      setGameOver(true);
-      setGameResult("lose");
-    }
+    const newRounds = rounds + 1;
+    setRounds(newRounds);
 
-    const userMsg = { role: "user", text: `₹${offer}` };
+    const userMsg = { role: "user", text: `₹${numOffer.toLocaleString()}` };
     setMessages((prev) => [...prev, userMsg]);
-
-    socket.emit("send_offer", { roomId, offer, player: playerName });
-
+    setOffer("");
     setLoading(true);
     setTyping(true);
 
+    // Check win/lose before AI reply
+    const isWin = numOffer >= selectedProduct.minPrice && numOffer <= selectedProduct.startPrice * 0.75;
+    const isLose = numOffer < selectedProduct.minPrice * 0.6;
+
     try {
       const res = await axios.post("https://aidriven-game.onrender.com/api/ai", {
-        offer,
+        offer: numOffer,
         history: messages,
+        product: {
+          name: selectedProduct.name,
+          startPrice: selectedProduct.startPrice,
+          minPrice: selectedProduct.minPrice,
+        },
       });
 
       setTimeout(() => {
         const aiMsg = { role: "ai", text: res.data.reply };
         setMessages((prev) => [...prev, aiMsg]);
-        if (res.data.score) setScore(res.data.score);
         setTyping(false);
         setLoading(false);
-      }, 800);
+
+        if (isWin) {
+          const finalScore = calcScore(selectedProduct, numOffer, newRounds);
+          setScore(finalScore);
+          setDealPrice(numOffer);
+          setGameResult("win");
+          setPhase("result");
+        } else if (isLose) {
+          setGameResult("lose");
+          setPhase("result");
+        }
+      }, 900);
     } catch (err) {
       console.error(err);
       setLoading(false);
       setTyping(false);
     }
-
-    setOffer("");
   };
 
+  const handleRestart = () => {
+    setPhase("select");
+    setSelectedProduct(null);
+    setMessages([]);
+    setOffer("");
+    setScore(0);
+    setRounds(0);
+    setDealPrice(null);
+    setGameResult(null);
+  };
+
+  // ─── PRODUCT SELECTION SCREEN ───────────────────────────
+  if (phase === "select") {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center px-4"
+        style={{ background: "linear-gradient(135deg, #0a0818, #1a1040, #0d1526)" }}>
+
+        <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }}
+          className="w-full max-w-lg">
+
+          <div className="flex items-center justify-between mb-6">
+            <button onClick={() => navigate("/")}
+              className="flex items-center gap-2 text-white/50 hover:text-white transition-all group">
+              <span className="group-hover:-translate-x-1 transition-transform">←</span>
+              <span className="text-sm">Home</span>
+            </button>
+            <h1 className="text-xl font-black text-white tracking-wide">🛒 Pick a Product</h1>
+            <div className="w-16" />
+          </div>
+
+          <p className="text-center text-white/40 text-sm mb-6">
+            Choose what you want to bargain for today
+          </p>
+
+          <div className="grid grid-cols-2 gap-3">
+            {PRODUCTS.map((p, i) => (
+              <motion.button
+                key={p.id}
+                initial={{ opacity:0, y:20 }}
+                animate={{ opacity:1, y:0 }}
+                transition={{ delay: i * 0.1 }}
+                whileHover={{ scale:1.04, y:-2 }}
+                whileTap={{ scale:0.97 }}
+                onClick={() => startGame(p)}
+                className="text-left rounded-2xl p-4 transition-all"
+                style={{
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                }}
+              >
+                <div style={{ fontSize:36, marginBottom:10 }}>{p.emoji}</div>
+                <div className="text-white font-bold text-base">{p.name}</div>
+                <div className="text-white/40 text-xs mt-1 mb-3">{p.description}</div>
+
+                <div className="flex flex-col gap-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-white/30">Shopkeeper asks</span>
+                    <span className="text-white font-semibold">₹{p.startPrice.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-white/30">Your target</span>
+                    <span className="text-green-400 font-semibold">
+                      ≤ ₹{Math.round(p.startPrice * 0.75).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-3 text-center py-1.5 rounded-xl text-xs font-bold text-white"
+                  style={{ background: "rgba(99,102,241,0.3)", border: "1px solid rgba(99,102,241,0.4)" }}>
+                  Bargain Now →
+                </div>
+              </motion.button>
+            ))}
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // ─── RESULT SCREEN ───────────────────────────
+  if (phase === "result") {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4"
+        style={{ background: "linear-gradient(135deg, #0a0818, #1a1040, #0d1526)" }}>
+        <motion.div initial={{ opacity:0, scale:0.9 }} animate={{ opacity:1, scale:1 }}
+          className="w-full max-w-sm text-center rounded-3xl p-8"
+          style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>
+
+          <motion.div
+            animate={{ scale: [1, 1.2, 1] }}
+            transition={{ duration: 0.6, delay: 0.2 }}
+            style={{ fontSize: 64, marginBottom: 16 }}>
+            {gameResult === "win" ? "🎉" : "😢"}
+          </motion.div>
+
+          <h2 className="text-2xl font-black text-white mb-2">
+            {gameResult === "win" ? "Deal Ho Gayi!" : "Deal Nahi Bani!"}
+          </h2>
+
+          {gameResult === "win" && (
+            <>
+              <p className="text-white/50 text-sm mb-6">
+                {selectedProduct.emoji} {selectedProduct.name} — ₹{dealPrice?.toLocaleString()} mein liya!
+              </p>
+
+              {/* Score breakdown */}
+              <div className="rounded-2xl p-4 mb-6 text-left space-y-2"
+                style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)" }}>
+                <div className="flex justify-between text-sm">
+                  <span className="text-white/50">Starting price</span>
+                  <span className="text-white">₹{selectedProduct.startPrice.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-white/50">Your deal</span>
+                  <span className="text-green-400 font-bold">₹{dealPrice?.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-white/50">You saved</span>
+                  <span className="text-yellow-400 font-bold">
+                    ₹{(selectedProduct.startPrice - (dealPrice || 0)).toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-white/50">Rounds taken</span>
+                  <span className="text-white">{rounds}</span>
+                </div>
+                <div className="h-px" style={{ background:"rgba(255,255,255,0.08)" }} />
+                <div className="flex justify-between">
+                  <span className="text-white font-bold">Final Score</span>
+                  <motion.span
+                    initial={{ scale:0 }} animate={{ scale:1 }} transition={{ delay:0.4, type:"spring" }}
+                    className="text-yellow-400 font-black text-xl">
+                    🏆 {score}
+                  </motion.span>
+                </div>
+              </div>
+            </>
+          )}
+
+          {gameResult === "lose" && (
+            <p className="text-white/50 text-sm mb-6">
+              Offer bahut kam tha! Shopkeeper ne deal tod di. 😤
+            </p>
+          )}
+
+          <div className="flex gap-3">
+            <button onClick={handleRestart}
+              className="flex-1 py-3 rounded-xl font-bold text-white transition-all"
+              style={{ background:"rgba(99,102,241,0.3)", border:"1px solid rgba(99,102,241,0.4)" }}>
+              ↺ Play Again
+            </button>
+            <button onClick={() => navigate("/leaderboard")}
+              className="flex-1 py-3 rounded-xl font-bold text-white transition-all"
+              style={{ background:"rgba(234,179,8,0.2)", border:"1px solid rgba(234,179,8,0.3)", color:"#fbbf24" }}>
+              🏆 Scores
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // ─── GAME SCREEN ───────────────────────────
   return (
     <div className="min-h-screen flex items-center justify-center px-4"
-      style={{ background: "linear-gradient(135deg, #0f0c29, #302b63, #24243e)" }}>
-
-      {/* 🌟 Glow BG Effect */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-72 h-72 bg-purple-600 opacity-10 rounded-full blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 w-72 h-72 bg-blue-500 opacity-10 rounded-full blur-3xl" />
-      </div>
+      style={{ background: "linear-gradient(135deg, #0a0818, #1a1040, #0d1526)" }}>
 
       <div className="relative w-full max-w-md z-10">
 
-        {/* 🔙 Top Bar */}
-        <div className="flex justify-between items-center mb-4">
-          <button
-            onClick={() => navigate(-1)}
-            className="flex items-center gap-2 text-white/60 hover:text-white transition-all duration-200 group"
-          >
-            <span className="text-xl group-hover:-translate-x-1 transition-transform duration-200">←</span>
-            <span className="text-sm font-medium">Back</span>
+        {/* Top bar */}
+        <div className="flex items-center justify-between mb-3">
+          <button onClick={handleRestart}
+            className="flex items-center gap-1 text-white/50 hover:text-white transition-all group text-sm">
+            <span className="group-hover:-translate-x-1 transition-transform">←</span> Back
           </button>
 
           <div className="text-center">
-            <h1 className="text-lg font-black text-white tracking-widest uppercase">
-              💰 Bargain Battle
-            </h1>
+            <div className="text-white font-black text-base">
+              {selectedProduct?.emoji} {selectedProduct?.name}
+            </div>
+            <div className="text-white/30 text-xs">{selectedProduct?.category}</div>
           </div>
 
-          <button
-            onClick={handleRestart}
-            className="flex items-center gap-2 text-white/60 hover:text-yellow-400 transition-all duration-200 group"
-            title="Restart Game"
-          >
-            <span className="text-sm font-medium">Restart</span>
-            <span className="text-xl group-hover:rotate-180 transition-transform duration-300">↺</span>
+          <button onClick={handleRestart}
+            className="text-white/50 hover:text-yellow-400 transition-all text-sm flex items-center gap-1">
+            New <span className="text-lg">↺</span>
           </button>
         </div>
 
-        {/* 🎮 Main Card */}
-        <motion.div
-          initial={{ opacity: 0, y: 20, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.4 }}
+        {/* Main card */}
+        <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }}
           className="rounded-3xl overflow-hidden shadow-2xl"
-          style={{
-            background: "rgba(255,255,255,0.05)",
-            border: "1px solid rgba(255,255,255,0.1)",
-            backdropFilter: "blur(20px)",
-          }}
-        >
-          {/* 🏷️ Score Bar */}
+          style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", backdropFilter:"blur(20px)" }}>
+
+          {/* Stats bar */}
           <div className="flex justify-between items-center px-5 py-3"
-            style={{ borderBottom: "1px solid rgba(255,255,255,0.08)", background: "rgba(0,0,0,0.2)" }}>
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-              <span className="text-white/50 text-xs font-medium uppercase tracking-widest">Live</span>
+            style={{ borderBottom:"1px solid rgba(255,255,255,0.08)", background:"rgba(0,0,0,0.2)" }}>
+            <div className="flex flex-col items-center">
+              <span className="text-white/30 text-xs">Asks</span>
+              <span className="text-white font-bold text-sm">₹{selectedProduct?.startPrice.toLocaleString()}</span>
             </div>
-            <div className="flex items-center gap-2 bg-yellow-400/10 border border-yellow-400/20 px-3 py-1 rounded-full">
-              <span className="text-yellow-400 text-xs font-bold">🏆 Score: {score}</span>
+            <div className="flex flex-col items-center">
+              <span className="text-white/30 text-xs">Your target</span>
+              <span className="text-green-400 font-bold text-sm">
+                ≤ ₹{selectedProduct ? Math.round(selectedProduct.startPrice * 0.75).toLocaleString() : "—"}
+              </span>
             </div>
-            <div className="text-white/30 text-xs">Room: {roomId}</div>
+            <div className="flex flex-col items-center">
+              <span className="text-white/30 text-xs">Rounds</span>
+              <span className="text-white font-bold text-sm">{rounds}</span>
+            </div>
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full"
+              style={{ background:"rgba(234,179,8,0.15)", border:"1px solid rgba(234,179,8,0.25)" }}>
+              <span className="text-yellow-400 text-xs font-bold">🏆 {score}</span>
+            </div>
           </div>
 
-          {/* 💬 Chat Area */}
-          <div
-            ref={chatRef}
-            className="h-80 overflow-y-auto px-4 py-3 space-y-3"
-            style={{ scrollbarWidth: "none" }}
-          >
-            {/* Intro message */}
-            {messages.length === 0 && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex flex-col items-center justify-center h-full text-center gap-3"
-              >
-                <div className="text-4xl">🛒</div>
-                <p className="text-white/40 text-sm">
-                  Shopkeeper ka starting price hai <span className="text-white font-bold">₹1000</span>
-                </p>
-                <p className="text-white/30 text-xs">
-                  Apna offer bhejo aur bargain karo!
-                </p>
-              </motion.div>
-            )}
-
+          {/* Chat area */}
+          <div ref={chatRef} className="h-80 overflow-y-auto px-4 py-3 space-y-3"
+            style={{ scrollbarWidth:"none" }}>
             <AnimatePresence>
               {messages.map((msg, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, y: 8, scale: 0.96 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  transition={{ duration: 0.25 }}
-                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                >
-                  {msg.role !== "user" && (
+                <motion.div key={i}
+                  initial={{ opacity:0, y:8, scale:0.96 }}
+                  animate={{ opacity:1, y:0, scale:1 }}
+                  transition={{ duration:0.25 }}
+                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+
+                  {msg.role === "ai" && (
                     <div className="w-7 h-7 rounded-full flex items-center justify-center text-sm mr-2 flex-shrink-0 mt-1"
-                      style={{ background: msg.role === "ai" ? "rgba(34,197,94,0.2)" : "rgba(168,85,247,0.2)" }}>
-                      {msg.role === "ai" ? "🧔" : "👤"}
-                    </div>
+                      style={{ background:"rgba(34,197,94,0.2)" }}>🧔</div>
                   )}
-                  <div
-                    className="px-4 py-2 rounded-2xl text-sm max-w-[72%] leading-relaxed"
+                  <div className="px-4 py-2 text-sm max-w-[72%] leading-relaxed text-white"
                     style={{
-                      background:
-                        msg.role === "user"
-                          ? "linear-gradient(135deg, #3b82f6, #6366f1)"
-                          : msg.role === "ai"
-                          ? "linear-gradient(135deg, #059669, #10b981)"
-                          : "linear-gradient(135deg, #7c3aed, #a855f7)",
-                      borderRadius:
-                        msg.role === "user"
-                          ? "18px 18px 4px 18px"
-                          : "18px 18px 18px 4px",
-                      boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
-                    }}
-                  >
-                    <span className="text-white">{msg.text}</span>
+                      background: msg.role === "user"
+                        ? "linear-gradient(135deg, #3b82f6, #6366f1)"
+                        : "linear-gradient(135deg, #059669, #10b981)",
+                      borderRadius: msg.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+                      boxShadow:"0 4px 15px rgba(0,0,0,0.2)",
+                    }}>
+                    {msg.text}
                   </div>
                   {msg.role === "user" && (
                     <div className="w-7 h-7 rounded-full flex items-center justify-center text-sm ml-2 flex-shrink-0 mt-1"
-                      style={{ background: "rgba(99,102,241,0.2)" }}>
-                      😎
-                    </div>
+                      style={{ background:"rgba(99,102,241,0.2)" }}>😎</div>
                   )}
                 </motion.div>
               ))}
             </AnimatePresence>
 
-            {/* 🤖 Typing Indicator */}
             {typing && (
-              <motion.div
-                initial={{ opacity: 0, y: 5 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex items-center gap-2"
-              >
+              <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }}
+                className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-full flex items-center justify-center text-sm"
-                  style={{ background: "rgba(34,197,94,0.2)" }}>🧔</div>
+                  style={{ background:"rgba(34,197,94,0.2)" }}>🧔</div>
                 <div className="px-4 py-3 rounded-2xl flex gap-1 items-center"
-                  style={{ background: "rgba(255,255,255,0.08)", borderRadius: "18px 18px 18px 4px" }}>
-                  {[0, 1, 2].map((i) => (
+                  style={{ background:"rgba(255,255,255,0.08)", borderRadius:"18px 18px 18px 4px" }}>
+                  {[0,1,2].map(i => (
                     <motion.div key={i} className="w-2 h-2 rounded-full bg-white/50"
-                      animate={{ y: [0, -4, 0] }}
-                      transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }} />
+                      animate={{ y:[0,-4,0] }}
+                      transition={{ duration:0.6, repeat:Infinity, delay:i*0.15 }} />
                   ))}
                 </div>
               </motion.div>
             )}
           </div>
 
-          {/* 🏁 Game Over Banner */}
-          <AnimatePresence>
-            {gameOver && (
-              <motion.div
-                initial={{ opacity: 0, scaleY: 0 }}
-                animate={{ opacity: 1, scaleY: 1 }}
-                className="mx-4 mb-3 p-3 rounded-2xl text-center"
-                style={{
-                  background: gameResult === "win"
-                    ? "linear-gradient(135deg, rgba(34,197,94,0.2), rgba(16,185,129,0.1))"
-                    : "linear-gradient(135deg, rgba(239,68,68,0.2), rgba(220,38,38,0.1))",
-                  border: `1px solid ${gameResult === "win" ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
-                }}
-              >
-                <p className="text-2xl mb-1">{gameResult === "win" ? "🎉" : "😢"}</p>
-                <p className="text-white font-bold text-sm">
-                  {gameResult === "win" ? "Badiya deal! Jeet gaye aap!" : "Deal nahi bani... Try again!"}
-                </p>
-                <button onClick={handleRestart}
-                  className="mt-2 px-4 py-1.5 rounded-full text-xs font-bold text-white transition-all"
-                  style={{ background: gameResult === "win" ? "#10b981" : "#ef4444" }}>
-                  Play Again ↺
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* 💸 Input Area */}
+          {/* Input area */}
           <div className="px-4 pb-4">
-            <form
-              onSubmit={(e) => { e.preventDefault(); handleSubmit(); }}
-              className="flex gap-2"
-            >
+            <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="flex gap-2">
               <div className="relative flex-1">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 font-bold text-sm">₹</span>
                 <input
@@ -292,38 +410,23 @@ const Game = () => {
                   value={offer}
                   onChange={(e) => setOffer(e.target.value)}
                   placeholder="Apna offer daalo..."
-                  disabled={gameOver}
-                  className="w-full pl-7 pr-3 py-3 rounded-xl text-white placeholder-white/30 outline-none text-sm transition-all"
-                  style={{
-                    background: "rgba(255,255,255,0.08)",
-                    border: "1px solid rgba(255,255,255,0.12)",
-                  }}
+                  className="w-full pl-7 pr-3 py-3 rounded-xl text-white placeholder-white/30 outline-none text-sm"
+                  style={{ background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.12)" }}
                 />
               </div>
-              <button
-                type="submit"
-                disabled={loading || gameOver}
-                className="px-5 py-3 rounded-xl font-bold text-sm text-white transition-all duration-200 disabled:opacity-40"
-                style={{
-                  background: loading
-                    ? "rgba(99,102,241,0.4)"
-                    : "linear-gradient(135deg, #6366f1, #8b5cf6)",
-                  boxShadow: loading ? "none" : "0 4px 15px rgba(99,102,241,0.4)",
-                }}
-              >
+              <button type="submit" disabled={loading}
+                className="px-5 py-3 rounded-xl font-bold text-sm text-white transition-all disabled:opacity-40"
+                style={{ background:"linear-gradient(135deg, #6366f1, #8b5cf6)",
+                  boxShadow: loading ? "none" : "0 4px 15px rgba(99,102,241,0.4)" }}>
                 {loading ? "⏳" : "Send 🚀"}
               </button>
             </form>
-
-            {/* 💡 Hint */}
             <p className="text-center text-white/20 text-xs mt-2">
-              Min: ₹700 · Start: ₹1000 · Sweet spot: ₹750
+              Min: ₹{selectedProduct?.minPrice.toLocaleString()} · Start: ₹{selectedProduct?.startPrice.toLocaleString()} · Target: ≤₹{selectedProduct ? Math.round(selectedProduct.startPrice * 0.75).toLocaleString() : "—"}
             </p>
           </div>
         </motion.div>
       </div>
     </div>
   );
-};
-
-export default Game;
+}
