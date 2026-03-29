@@ -1,9 +1,9 @@
-import { Router } from "express";
+import express from "express";
 import { addScore, getLeaderboard } from "../controllers/score.controller.js";
 
-const router = Router();
+const router = express.Router();
 
-router.post("/", addScore);
 router.get("/", getLeaderboard);
+router.post("/", addScore);
 
 export default router;

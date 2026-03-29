@@ -1,9 +1,8 @@
 import { useEffect, useState, useRef } from "react";
-import axios from "axios";
+import API from "../services/api";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 
-// 🛒 Product catalog
 const PRODUCTS = [
   {
     id: "phone",
@@ -43,17 +42,16 @@ const PRODUCTS = [
   },
 ];
 
-// 🏅 Score calculator: lower deal price = higher score
 const calcScore = (product, dealPrice, rounds) => {
   const savings = product.startPrice - dealPrice;
   const maxSavings = product.startPrice - product.minPrice;
   const savingsPct = Math.min(savings / maxSavings, 1);
-  const roundBonus = Math.max(0, 10 - rounds) * 5; // fewer rounds = bonus
+  const roundBonus = Math.max(0, 10 - rounds) * 5;
   return Math.round(savingsPct * 800 + roundBonus + 100);
 };
 
-export default function Game() {
-  const [phase, setPhase] = useState("select"); // "select" | "play" | "result"
+export default function Game({ playerName }) {
+  const [phase, setPhase] = useState("select");
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [offer, setOffer] = useState("");
   const [messages, setMessages] = useState([]);
@@ -62,7 +60,7 @@ export default function Game() {
   const [score, setScore] = useState(0);
   const [rounds, setRounds] = useState(0);
   const [dealPrice, setDealPrice] = useState(null);
-  const [gameResult, setGameResult] = useState(null); // "win" | "lose"
+  const [gameResult, setGameResult] = useState(null);
 
   const chatRef = useRef(null);
   const navigate = useNavigate();
@@ -78,6 +76,24 @@ export default function Game() {
       role: "ai",
       text: `Namaste! Aaj main aapko yeh ${product.name} sirf ₹${product.startPrice.toLocaleString()} mein de sakta hoon. Kya offer karenge? 😊`,
     }]);
+    setScore(0);
+    setRounds(0);
+    setDealPrice(null);
+    setGameResult(null);
+    setOffer("");
+  };
+
+  const handleRestart = () => {
+    setPhase("select");
+    setSelectedProduct(null);
+    setMessages([]);
+    setOffer("");
+    setScore(0);
+    setRounds(0);
+    setDealPrice(null);
+    setGameResult(null);
+    setLoading(false);
+    setTyping(false);
   };
 
   const handleSubmit = async () => {
@@ -94,12 +110,11 @@ export default function Game() {
     setLoading(true);
     setTyping(true);
 
-    // Check win/lose before AI reply
     const isWin = numOffer >= selectedProduct.minPrice && numOffer <= selectedProduct.startPrice * 0.75;
     const isLose = numOffer < selectedProduct.minPrice * 0.6;
 
     try {
-      const res = await axios.post("https://aidriven-game.onrender.com/api/ai", {
+      const res = await API.post("/ai", {
         offer: numOffer,
         history: messages,
         product: {
@@ -109,7 +124,7 @@ export default function Game() {
         },
       });
 
-      setTimeout(() => {
+      setTimeout(async () => {
         const aiMsg = { role: "ai", text: res.data.reply };
         setMessages((prev) => [...prev, aiMsg]);
         setTyping(false);
@@ -121,6 +136,20 @@ export default function Game() {
           setDealPrice(numOffer);
           setGameResult("win");
           setPhase("result");
+
+          // ✅ Score backend pe save karo
+          try {
+            await API.post("/score", {
+              name: playerName,
+              score: finalScore,
+              product: selectedProduct.name,
+              dealPrice: numOffer,
+              rounds: newRounds,
+            });
+          } catch (e) {
+            console.error("Score save failed:", e);
+          }
+
         } else if (isLose) {
           setGameResult("lose");
           setPhase("result");
@@ -133,40 +162,46 @@ export default function Game() {
     }
   };
 
-  const handleRestart = () => {
-    setPhase("select");
-    setSelectedProduct(null);
-    setMessages([]);
-    setOffer("");
-    setScore(0);
-    setRounds(0);
-    setDealPrice(null);
-    setGameResult(null);
-  };
-
-  // ─── PRODUCT SELECTION SCREEN ───────────────────────────
+  // ════════════════════════════════════════
+  // SCREEN 1 — Product Selection
+  // ════════════════════════════════════════
   if (phase === "select") {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-4"
         style={{ background: "linear-gradient(135deg, #0a0818, #1a1040, #0d1526)" }}>
 
-        <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }}
-          className="w-full max-w-lg">
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+          <div style={{ position:"absolute", top:"15%", left:"20%", width:350, height:350,
+            borderRadius:"50%", background:"rgba(99,102,241,0.12)", filter:"blur(80px)" }} />
+          <div style={{ position:"absolute", bottom:"15%", right:"15%", width:300, height:300,
+            borderRadius:"50%", background:"rgba(139,92,246,0.1)", filter:"blur(80px)" }} />
+        </div>
 
+        <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }}
+          className="relative z-10 w-full max-w-lg">
+
+          {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <button onClick={() => navigate("/")}
-              className="flex items-center gap-2 text-white/50 hover:text-white transition-all group">
-              <span className="group-hover:-translate-x-1 transition-transform">←</span>
-              <span className="text-sm">Home</span>
+              className="flex items-center gap-1 text-white/50 hover:text-white transition-all group text-sm">
+              <span className="group-hover:-translate-x-1 transition-transform">←</span> Home
             </button>
-            <h1 className="text-xl font-black text-white tracking-wide">🛒 Pick a Product</h1>
+            <div className="text-center">
+              <h1 className="text-xl font-black text-white tracking-wide">🛒 Pick a Product</h1>
+              <p className="text-white/30 text-xs mt-0.5">Kya kharidna hai aaj?</p>
+            </div>
             <div className="w-16" />
           </div>
 
-          <p className="text-center text-white/40 text-sm mb-6">
-            Choose what you want to bargain for today
-          </p>
+          {/* Player badge */}
+          <div className="flex justify-center mb-5">
+            <div className="flex items-center gap-2 px-4 py-1.5 rounded-full text-sm"
+              style={{ background:"rgba(99,102,241,0.15)", border:"1px solid rgba(99,102,241,0.25)", color:"#a5b4fc" }}>
+              👤 {playerName}
+            </div>
+          </div>
 
+          {/* Product Grid */}
           <div className="grid grid-cols-2 gap-3">
             {PRODUCTS.map((p, i) => (
               <motion.button
@@ -178,16 +213,13 @@ export default function Game() {
                 whileTap={{ scale:0.97 }}
                 onClick={() => startGame(p)}
                 className="text-left rounded-2xl p-4 transition-all"
-                style={{
-                  background: "rgba(255,255,255,0.05)",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                }}
+                style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.08)" }}
               >
                 <div style={{ fontSize:36, marginBottom:10 }}>{p.emoji}</div>
                 <div className="text-white font-bold text-base">{p.name}</div>
                 <div className="text-white/40 text-xs mt-1 mb-3">{p.description}</div>
 
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1 mb-3">
                   <div className="flex justify-between text-xs">
                     <span className="text-white/30">Shopkeeper asks</span>
                     <span className="text-white font-semibold">₹{p.startPrice.toLocaleString()}</span>
@@ -200,8 +232,8 @@ export default function Game() {
                   </div>
                 </div>
 
-                <div className="mt-3 text-center py-1.5 rounded-xl text-xs font-bold text-white"
-                  style={{ background: "rgba(99,102,241,0.3)", border: "1px solid rgba(99,102,241,0.4)" }}>
+                <div className="text-center py-1.5 rounded-xl text-xs font-bold text-white"
+                  style={{ background:"rgba(99,102,241,0.3)", border:"1px solid rgba(99,102,241,0.4)" }}>
                   Bargain Now →
                 </div>
               </motion.button>
@@ -212,19 +244,22 @@ export default function Game() {
     );
   }
 
-  // ─── RESULT SCREEN ───────────────────────────
+  // ════════════════════════════════════════
+  // SCREEN 2 — Result
+  // ════════════════════════════════════════
   if (phase === "result") {
     return (
       <div className="min-h-screen flex items-center justify-center px-4"
         style={{ background: "linear-gradient(135deg, #0a0818, #1a1040, #0d1526)" }}>
+
         <motion.div initial={{ opacity:0, scale:0.9 }} animate={{ opacity:1, scale:1 }}
           className="w-full max-w-sm text-center rounded-3xl p-8"
-          style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>
+          style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", backdropFilter:"blur(20px)" }}>
 
           <motion.div
-            animate={{ scale: [1, 1.2, 1] }}
-            transition={{ duration: 0.6, delay: 0.2 }}
-            style={{ fontSize: 64, marginBottom: 16 }}>
+            animate={{ scale:[1, 1.2, 1] }}
+            transition={{ duration:0.6, delay:0.2 }}
+            style={{ fontSize:64, marginBottom:16 }}>
             {gameResult === "win" ? "🎉" : "😢"}
           </motion.div>
 
@@ -238,9 +273,15 @@ export default function Game() {
                 {selectedProduct.emoji} {selectedProduct.name} — ₹{dealPrice?.toLocaleString()} mein liya!
               </p>
 
-              {/* Score breakdown */}
               <div className="rounded-2xl p-4 mb-6 text-left space-y-2"
                 style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)" }}>
+
+                {/* Player name */}
+                <div className="flex justify-between text-sm">
+                  <span className="text-white/50">Player</span>
+                  <span className="text-white font-semibold">👤 {playerName}</span>
+                </div>
+
                 <div className="flex justify-between text-sm">
                   <span className="text-white/50">Starting price</span>
                   <span className="text-white">₹{selectedProduct.startPrice.toLocaleString()}</span>
@@ -259,14 +300,23 @@ export default function Game() {
                   <span className="text-white/50">Rounds taken</span>
                   <span className="text-white">{rounds}</span>
                 </div>
+
                 <div className="h-px" style={{ background:"rgba(255,255,255,0.08)" }} />
-                <div className="flex justify-between">
+
+                <div className="flex justify-between items-center">
                   <span className="text-white font-bold">Final Score</span>
                   <motion.span
-                    initial={{ scale:0 }} animate={{ scale:1 }} transition={{ delay:0.4, type:"spring" }}
+                    initial={{ scale:0 }} animate={{ scale:1 }}
+                    transition={{ delay:0.4, type:"spring" }}
                     className="text-yellow-400 font-black text-xl">
                     🏆 {score}
                   </motion.span>
+                </div>
+
+                {/* Save confirmation */}
+                <div className="flex items-center justify-center gap-2 text-xs rounded-lg py-1.5 mt-1"
+                  style={{ background:"rgba(34,197,94,0.1)", border:"1px solid rgba(34,197,94,0.2)", color:"#4ade80" }}>
+                  ✅ Score leaderboard pe save ho gaya!
                 </div>
               </div>
             </>
@@ -274,28 +324,35 @@ export default function Game() {
 
           {gameResult === "lose" && (
             <p className="text-white/50 text-sm mb-6">
-              Offer bahut kam tha! Shopkeeper ne deal tod di. 😤
+              Offer bahut kam tha! Shopkeeper ne deal tod di. 😤<br />
+              <span className="text-white/30 text-xs">
+                Min price tha: ₹{selectedProduct?.minPrice.toLocaleString()}
+              </span>
             </p>
           )}
 
           <div className="flex gap-3">
-            <button onClick={handleRestart}
-              className="flex-1 py-3 rounded-xl font-bold text-white transition-all"
+            <motion.button whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }}
+              onClick={handleRestart}
+              className="flex-1 py-3 rounded-xl font-bold text-white"
               style={{ background:"rgba(99,102,241,0.3)", border:"1px solid rgba(99,102,241,0.4)" }}>
               ↺ Play Again
-            </button>
-            <button onClick={() => navigate("/leaderboard")}
-              className="flex-1 py-3 rounded-xl font-bold text-white transition-all"
-              style={{ background:"rgba(234,179,8,0.2)", border:"1px solid rgba(234,179,8,0.3)", color:"#fbbf24" }}>
+            </motion.button>
+            <motion.button whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }}
+              onClick={() => navigate("/leaderboard")}
+              className="flex-1 py-3 rounded-xl font-bold"
+              style={{ background:"rgba(234,179,8,0.15)", border:"1px solid rgba(234,179,8,0.3)", color:"#fbbf24" }}>
               🏆 Scores
-            </button>
+            </motion.button>
           </div>
         </motion.div>
       </div>
     );
   }
 
-  // ─── GAME SCREEN ───────────────────────────
+  // ════════════════════════════════════════
+  // SCREEN 3 — Game / Chat
+  // ════════════════════════════════════════
   return (
     <div className="min-h-screen flex items-center justify-center px-4"
       style={{ background: "linear-gradient(135deg, #0a0818, #1a1040, #0d1526)" }}>
@@ -308,14 +365,12 @@ export default function Game() {
             className="flex items-center gap-1 text-white/50 hover:text-white transition-all group text-sm">
             <span className="group-hover:-translate-x-1 transition-transform">←</span> Back
           </button>
-
           <div className="text-center">
             <div className="text-white font-black text-base">
               {selectedProduct?.emoji} {selectedProduct?.name}
             </div>
             <div className="text-white/30 text-xs">{selectedProduct?.category}</div>
           </div>
-
           <button onClick={handleRestart}
             className="text-white/50 hover:text-yellow-400 transition-all text-sm flex items-center gap-1">
             New <span className="text-lg">↺</span>
@@ -335,7 +390,7 @@ export default function Game() {
               <span className="text-white font-bold text-sm">₹{selectedProduct?.startPrice.toLocaleString()}</span>
             </div>
             <div className="flex flex-col items-center">
-              <span className="text-white/30 text-xs">Your target</span>
+              <span className="text-white/30 text-xs">Target</span>
               <span className="text-green-400 font-bold text-sm">
                 ≤ ₹{selectedProduct ? Math.round(selectedProduct.startPrice * 0.75).toLocaleString() : "—"}
               </span>
@@ -353,6 +408,14 @@ export default function Game() {
           {/* Chat area */}
           <div ref={chatRef} className="h-80 overflow-y-auto px-4 py-3 space-y-3"
             style={{ scrollbarWidth:"none" }}>
+
+            {messages.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-full text-center gap-2">
+                <div style={{ fontSize:40 }}>{selectedProduct?.emoji}</div>
+                <p className="text-white/30 text-sm">Bargaining shuru karo!</p>
+              </div>
+            )}
+
             <AnimatePresence>
               {messages.map((msg, i) => (
                 <motion.div key={i}
@@ -388,7 +451,7 @@ export default function Game() {
                 className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-full flex items-center justify-center text-sm"
                   style={{ background:"rgba(34,197,94,0.2)" }}>🧔</div>
-                <div className="px-4 py-3 rounded-2xl flex gap-1 items-center"
+                <div className="px-4 py-3 flex gap-1 items-center"
                   style={{ background:"rgba(255,255,255,0.08)", borderRadius:"18px 18px 18px 4px" }}>
                   {[0,1,2].map(i => (
                     <motion.div key={i} className="w-2 h-2 rounded-full bg-white/50"
@@ -421,11 +484,18 @@ export default function Game() {
                 {loading ? "⏳" : "Send 🚀"}
               </button>
             </form>
+
             <p className="text-center text-white/20 text-xs mt-2">
-              Min: ₹{selectedProduct?.minPrice.toLocaleString()} · Start: ₹{selectedProduct?.startPrice.toLocaleString()} · Target: ≤₹{selectedProduct ? Math.round(selectedProduct.startPrice * 0.75).toLocaleString() : "—"}
+              Min: ₹{selectedProduct?.minPrice.toLocaleString()} · Target: ≤ ₹
+              {selectedProduct ? Math.round(selectedProduct.startPrice * 0.75).toLocaleString() : "—"}
             </p>
           </div>
         </motion.div>
+
+        {/* Player tag */}
+        <div className="flex justify-center mt-3">
+          <div className="text-white/20 text-xs">Playing as 👤 {playerName}</div>
+        </div>
       </div>
     </div>
   );
